@@ -12,8 +12,9 @@ services:
       # PostgreSQL 18+ images expect the volume mounted at the parent
       # directory (not .../data) so pg_ctlcluster-style upgrades work.
       - postgres-data:/var/lib/postgresql
-      # Creates the fulfillx_auth database on first init only. See
-      # infrastructure/postgres/init/01-create-auth-database.sql.
+      # Creates the fulfillx_auth and fulfillx_inventory databases on first
+      # init only. See infrastructure/postgres/init/01-create-auth-database.sql
+      # and 02-create-inventory-database.sql.
       - ./infrastructure/postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fulfillx} -d ${POSTGRES_DB:-fulfillx_orders}"]
