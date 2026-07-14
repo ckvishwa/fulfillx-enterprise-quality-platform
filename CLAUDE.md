@@ -49,6 +49,9 @@ out-of-scope list, stop and raise it rather than building it.
 | Event streaming | Redpanda (Kafka API-compatible) | Preferred over Kafka for local developer ergonomics. |
 | Migrations | Flyway, via `spring-boot-starter-flyway` + `flyway-database-postgresql` | Spring Boot 4.x no longer auto-configures Flyway from `flyway-core` alone; the starter is mandatory. PostgreSQL support was split out of `flyway-core` in Flyway 10+. |
 | Integration testing | Testcontainers **2.x** | Note: Testcontainers 2.0 renamed several artifacts (e.g. `org.testcontainers:junit-jupiter` → `org.testcontainers:testcontainers-junit-jupiter`, `org.testcontainers:postgresql` → `org.testcontainers:testcontainers-postgresql`). Always check the locally-resolved `testcontainers-bom` before assuming pre-2.x coordinates. |
+| JWT | jjwt (`io.jsonwebtoken`) 0.13.0, modular (`jjwt-api`/`jjwt-impl`/`jjwt-jackson`) | Maintained, HS256, builder/parser API (`Jwts.builder()...signWith(key)`, `Jwts.parser().verifyWith(key)...parseSignedClaims(...)`). See `docs/decisions/ADR-002-identity-and-cross-service-data-ownership.md` for how identity crosses service boundaries. |
+| JSON (auth-service manual serialization) | Jackson **3** (`tools.jackson.databind.json.JsonMapper`) | Spring Boot 4's actual default — `spring-boot-starter-web` pulls Jackson 3 via `spring-boot-starter-jackson`, not classic `com.fasterxml.jackson` `ObjectMapper`, which is only present transitively (runtime scope, via `jjwt-jackson`) and not safe to `@Autowire`. Only matters where JSON is written by hand outside normal Spring MVC dispatch (e.g. `RestAuthenticationEntryPoint`, `RestAccessDeniedHandler`) — everything returned from a `@RestController`/`@RestControllerAdvice` method is serialized automatically and doesn't need this. |
+| MockMvc test support | `org.springframework.boot:spring-boot-webmvc-test` | Spring Boot 4 moved `@AutoConfigureMockMvc` out of `spring-boot-test-autoconfigure` into this module (new package `org.springframework.boot.webmvc.test.autoconfigure`); `spring-boot-starter-test` alone no longer provides it. |
 | Quality frameworks | REST Assured, JUnit 5, AssertJ, Jackson, Allure (Java); Playwright + TypeScript (UI); Pact (contracts); k6 (performance) | Per section 6 of the original build brief. Not yet built — see Known limitations. |
 
 Money is always stored as integer minor units (`*_minor` columns, `long` in
@@ -59,10 +62,13 @@ Java). Never floating point.
 ```
 fulfillx-enterprise-quality-platform/
 ├── applications/
-│   └── order-service/        # Implemented (skeleton). Others: Planned.
+│   ├── order-service/        # Implemented (skeleton). Others: Planned.
+│   └── auth-service/         # Implemented: register/login/me, JWT, RBAC foundation.
 ├── quality-platform/          # Planned — not yet created (Phase 3+)
-├── infrastructure/            # Not yet needed as a separate tree; compose
-│                               # lives at root per section 14 of the brief
+├── infrastructure/
+│   └── postgres/init/         # Implemented: creates the fulfillx_auth database
+│                               # (docker-compose otherwise lives at root per
+│                               # section 14 of the brief)
 ├── docs/
 │   ├── architecture/
 │   ├── business-risks/
@@ -140,7 +146,19 @@ applications and must not inherit Spring Boot's dependency management.
   payment data ever, no card storage; Actuator exposure restricted to
   `health,info`; no secrets in logs (passwords, JWT secrets, full tokens,
   PII, card data).
-- Roles: `CUSTOMER`, `OPERATOR`, `ADMIN` (not yet implemented — Phase 2A).
+- Roles: `CUSTOMER`, `OPERATOR`, `ADMIN` — **implemented** in auth-service
+  (`UserRole` enum, DB `CHECK` constraint, JWT `role` claim). Public
+  registration always creates `CUSTOMER`; there is no endpoint yet that
+  lets a caller self-assign `OPERATOR`/`ADMIN`.
+- auth-service specifics (Phase 2A): BCrypt password hashing
+  (`BCryptPasswordEncoder`); JWT secret required from `AUTH_JWT_SECRET`
+  with no hard-coded default (startup fails fast if unset); bounded JWT
+  lifetime (`AUTH_JWT_EXPIRATION_MINUTES`, default 30); login checks the
+  password before account status, so a caller without valid credentials
+  can never learn whether an account exists, is locked, or is disabled;
+  password hashes are never returned by any API response and never logged;
+  JWT contents are never logged (only the exception class name is logged
+  on a rejected token, at debug level).
 
 ## 9. Database rules
 
@@ -196,41 +214,66 @@ capabilities that don't exist in the repo yet.
 
 ## 15. Current project phase
 
-**Phase 0 (repository operating system) and the smallest safe slice of
-Phase 1 (executable infrastructure foundation) are complete.**
+**Phase 0, the smallest safe slice of Phase 1, and Phase 2A (authentication
+and identity foundation) are complete.**
 
-Implemented:
+Implemented (Phase 0/1):
 - Git repository, `.gitignore`, `.gitattributes`, this file, root README,
   architecture/risk/strategy/traceability/ADR/roadmap docs.
 - Root Maven aggregator + Maven Wrapper (bootstraps Apache Maven 3.9.16;
   no system Maven required).
 - `order-service`: Spring Boot 4.1.0 skeleton, Actuator health endpoint
   (liveness/readiness), `orders` table via Flyway V1 migration, `Order`
-  JPA entity + `OrderStatus` enum, one real Testcontainers-backed
-  integration test (proves the migration applies cleanly and the
-  idempotency-key constraint rejects duplicates against real PostgreSQL).
+  JPA entity + `OrderStatus` enum, real Testcontainers-backed integration
+  tests (migration applies cleanly; idempotency-key uniqueness and
+  `customer_id NOT NULL` are proven against real PostgreSQL).
 - `docker-compose.yml`: PostgreSQL 18, Redis 8, Redpanda v26.1.12, with
-  health checks, named volumes, and a shared network. Validated locally:
-  all three containers report healthy, and `order-service` started against
-  them, ran Flyway, and answered `/actuator/health` as `UP`.
+  health checks, named volumes, and a shared network.
 - `.github/workflows/pr.yml`: Java 21 + Maven-cache setup, `./mvnw clean
-  verify` (compiles, runs the integration test, requires Docker — available
-  by default on GitHub-hosted runners).
+  verify` for the full reactor.
 
-Not yet built (do not claim otherwise): authentication, RBAC,
-inventory/payment/notification services, the order state-transition guard
-logic (illegal-transition rejection), any HTTP order API beyond
-`/actuator/health`, the web portal, the quality-platform Java/Playwright/
-Pact/k6 frameworks, the outbox pattern, seeded defects.
+Implemented (Phase 2A):
+- `auth-service`: Spring Boot 4.1.0, Spring Security (stateless, JWT
+  bearer auth), `users` table via Flyway V1 migration in its own
+  `fulfillx_auth` database, `User` entity + `UserRole`/`UserStatus` enums.
+- Endpoints: `POST /api/v1/auth/register`, `POST /api/v1/auth/login`,
+  `GET /api/v1/auth/me`, plus restricted Actuator health.
+- JWT issuance/validation (jjwt 0.13.0, HS256, bounded lifetime), BCrypt
+  password hashing, correlation-ID propagation (`X-Correlation-Id`,
+  request-scoped MDC), the platform error contract enforced consistently
+  including at the security-filter layer (not just `@RestControllerAdvice`).
+- `docker-compose.yml` now provisions a second logical database
+  (`fulfillx_auth`) via `infrastructure/postgres/init/`; order-service and
+  auth-service remain on separate databases with no physical cross-service
+  foreign key — see
+  `docs/decisions/ADR-002-identity-and-cross-service-data-ownership.md`.
+- order-service `V2__document_customer_identity_reference.sql`: documents
+  (via `COMMENT ON COLUMN`, not a structural change) how `customer_id`
+  relates to auth-service's `users.id`.
+- 16 new tests in auth-service (13 integration via Testcontainers
+  PostgreSQL 18, 3 unit for JWT issue/expire/tamper) + 1 new order-service
+  test, all passing. See
+  `docs/traceability/risk-to-test-traceability.md` for the mapping.
+
+Not yet built (do not claim otherwise): inventory/payment/notification
+services, any order business API beyond `/actuator/health` (order
+creation, reservation, payment, cancellation, refund), request-time
+JWT-based customer-identity validation in order-service (the ADR-002
+integrity mechanism is designed but not wired up — no order-creation
+endpoint exists yet to do the validating), the order state-transition
+guard logic, an admin/operator endpoint to provision `OPERATOR`/`ADMIN`
+accounts or to lock/disable a user, the web portal, the quality-platform
+Java/Playwright/Pact/k6 frameworks, the outbox pattern, seeded defects.
 
 ## 16. Known limitations
 
-- `order-service` has no order API yet beyond Actuator health — by design
-  for this phase (see section 33 of the original brief: "A full order API
-  is not required during this first run").
-- `customer_id` has no foreign key yet; there is no `users` table because
-  auth-service doesn't exist. This is intentional and will be addressed
-  when Phase 2A introduces identity.
+- `order-service` has no order API yet beyond Actuator health.
+- `customer_id` has **no physical foreign key by design** — order-service
+  and auth-service are on separate databases specifically so this isn't
+  possible. Integrity is meant to be established via JWT validation at
+  request time, but no order-creation endpoint exists yet to actually do
+  that validation, so today `NOT NULL` is the only enforced check. See
+  ADR-002.
 - Order-state **transition guard logic** (rejecting `DELIVERED → CREATED`
   etc.) is not implemented — only the enum and a DB `CHECK` constraint on
   valid *values* exist so far. Transition rules are domain behavior slated
@@ -238,19 +281,45 @@ Pact/k6 frameworks, the outbox pattern, seeded defects.
 - No outbox pattern yet — no events are published at all yet, so there is
   nothing to make durable. This must be addressed before Phase 7 (event
   reliability) or documented as a residual limitation if deferred further.
-- `order-service` is not containerized (no Dockerfile) and is not part of
-  `docker-compose.yml`; it currently runs via `./mvnw spring-boot:run`
-  against the composed infrastructure. Containerizing it is future work,
-  likely around Phase 11 (release evidence).
-- CI runs `order-service`'s own build only; there is nothing else in the
-  reactor yet.
+- `order-service` and `auth-service` are not containerized (no
+  Dockerfiles) and are not part of `docker-compose.yml`; both currently
+  run via `./mvnw spring-boot:run` against the composed infrastructure.
+  Containerizing them is future work, likely around Phase 11 (release
+  evidence).
+- No endpoint exists to provision an `OPERATOR`/`ADMIN` account or to
+  lock/disable a user — public registration always creates `CUSTOMER`, and
+  the "disabled user" test in `AuthApiIntegrationTest` reaches into the
+  repository directly to flip status, since there's no API to do it. This
+  is intentional for Phase 2A's scope, not an oversight.
+- Once a JWT is issued, it remains valid until natural expiry even if the
+  account is disabled afterward — there is no revocation list. The
+  mitigation is a short, bounded token lifetime (30 minutes by default),
+  not revocation; revisit if that tradeoff stops being acceptable.
+- Registration reveals whether an email is already registered (409
+  `EMAIL_ALREADY_REGISTERED`), a minor, deliberate email-enumeration
+  tradeoff — login, by contrast, is hardened against enumeration (uniform
+  `INVALID_CREDENTIALS` regardless of whether the email exists).
+- auth-service and order-service share one Postgres superuser credential
+  pair in local dev (`fulfillx`/`fulfillx`) rather than distinct
+  least-privilege roles per database — a documented local-dev
+  simplification (ADR-002), not a production security decision.
+- CI (`.github/workflows/pr.yml`) runs `./mvnw clean verify` at the repo
+  root, which now builds and tests the full reactor (order-service +
+  auth-service) — this has been verified **locally** but the workflow
+  itself has not yet actually run on GitHub Actions (no push to a remote
+  has triggered it).
 
 ## 17. Required validation commands
 
 ```bash
-./mvnw -B clean verify        # compiles order-service, runs its tests (needs Docker)
+./mvnw -B clean verify        # compiles and tests the full reactor (needs Docker)
 docker compose config          # validate compose syntax
-docker compose up -d           # start Postgres, Redis, Redpanda
+docker compose up -d           # start Postgres (creates fulfillx_auth on first init), Redis, Redpanda
 docker compose ps              # confirm all three report healthy
-docker compose down            # stop (add -v only if volumes should be wiped)
+docker compose down            # stop (add -v only if volumes should be wiped, e.g. to re-trigger the auth-db init script)
 ```
+
+Note: `infrastructure/postgres/init/` only runs against a **fresh**
+`postgres-data` volume. If that volume already exists from before
+`fulfillx_auth` was introduced, run `docker compose down -v` once to pick
+up the new database before `auth-service` can connect.

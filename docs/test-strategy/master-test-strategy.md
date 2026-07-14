@@ -11,8 +11,8 @@ is a byproduct of covering real risk, not a quota to hit.
 
 | Layer | Tool | What it proves | Status |
 |---|---|---|---|
-| Unit/domain | JUnit 5 + AssertJ | Domain rules in isolation (e.g. state-transition guards) | Planned (Phase 2) |
-| Integration | JUnit 5 + Testcontainers | Real behavior against real PostgreSQL/Redis/Redpanda, not mocks | **Started** — `OrderPersistenceIntegrationTest` runs against a real Testcontainers PostgreSQL instance |
+| Unit/domain | JUnit 5 + AssertJ | Domain rules in isolation (e.g. JWT issue/expire/tamper in `JwtServiceTest`; order state-transition guards remain Planned for Phase 2) | **Started** |
+| Integration | JUnit 5 + Testcontainers | Real behavior against real PostgreSQL/Redis/Redpanda, not mocks | **Started** — `OrderPersistenceIntegrationTest` and `AuthApiIntegrationTest` both run against real Testcontainers PostgreSQL 18 instances |
 | API | REST Assured + JUnit 5 + Allure | Contract-level behavior of each service's HTTP API, including negative/authz cases | Planned (Phase 3) |
 | UI | Playwright + TypeScript | Critical user-visible flows, authorization boundaries, accessibility, premature-success prevention | Planned (Phase 5) |
 | Contract | Pact | Independently-deployable service boundaries don't break each other | Planned (Phase 6) |
@@ -37,10 +37,13 @@ is a byproduct of covering real risk, not a quota to hit.
 
 ## CI integration
 
-`.github/workflows/pr.yml` currently runs `./mvnw clean verify` for
-`order-service`, which includes the one Testcontainers integration test.
-As layers are added (API, event, concurrency, contract), they join the PR
-pipeline per the target sequence in the original build brief (section 24):
+`.github/workflows/pr.yml` runs `./mvnw clean verify` at the repo root,
+which now builds and tests the **full reactor** (`order-service` +
+`auth-service` — 3 + 16 tests respectively as of Phase 2A), including every
+Testcontainers-backed integration test. This has been verified locally;
+the workflow itself has not yet actually run on GitHub Actions. As layers
+are added (API, event, concurrency, contract), they join the PR pipeline
+per the target sequence in the original build brief (section 24):
 formatting → static analysis → unit → build → Testcontainers integration →
 API → Pact → critical Playwright → dependency/secret scanning → quality
 gate. Heavier suites (full Playwright matrix, concurrency, k6 baseline)

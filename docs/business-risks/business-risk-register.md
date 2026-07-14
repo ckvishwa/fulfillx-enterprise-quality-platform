@@ -12,7 +12,7 @@ risk is found that isn't listed, add it before writing the test.
 | RISK-04 | Payment uncertainty after network timeout | Order stuck in ambiguous state; possible double charge or lost payment | Idempotent payment operation IDs, retry-returns-existing-result (Phase 8) |
 | RISK-05 | Partial workflow completion (inventory reserved, payment never resolves) | Reserved stock never released; phantom holds | Saga compensation, orphan-reservation test (Phase 2/8) |
 | RISK-06 | Database rollback failure mid-workflow | Inconsistent state across tables | Integration tests with targeted DB assertions (Phase 4) |
-| RISK-07 | Unauthorized refund access | Financial loss, fraud | RBAC enforcement + API/UI authorization tests (Phase 2A/5) |
+| RISK-07 | Unauthorized refund access | Financial loss, fraud | RBAC enforcement + API/UI authorization tests (Phase 2A/5) — **partially implemented**: the identity/RBAC foundation (real auth, roles, bounded JWTs) exists and is tested; endpoint-specific authorization (e.g. a customer can't refund another customer's order) can't be proven yet because no refund endpoint exists |
 | RISK-08 | Duplicate event processing | Duplicate notifications, duplicate side effects | Consumer idempotency test (Phase 7) |
 | RISK-09 | Out-of-order event delivery | Corrupted derived state | Ordering-tolerant consumer design + test (Phase 7) |
 | RISK-10 | Poison messages | Consumer crash loop, stalled processing | Dead-letter routing + test (Phase 7) |
@@ -32,7 +32,7 @@ risk is found that isn't listed, add it before writing the test.
 - **Planned** — protection does not exist yet; phase reference indicates
   when it is scheduled.
 
-Only RISK-02 and (partially) RISK-15/RISK-16 have any implemented
-protection as of this phase. Everything else is planned. See
+RISK-02 has full implemented protection. RISK-07, RISK-15, and RISK-16 have
+partial implemented protection. Everything else is planned. See
 `docs/traceability/risk-to-test-traceability.md` for the live mapping to
 actual test files as they're added.
