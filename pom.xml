@@ -35,6 +35,7 @@
   <modules>
     <module>applications/order-service</module>
     <module>applications/auth-service</module>
+    <module>applications/inventory-service</module>
   </modules>
 
 </project>

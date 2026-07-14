@@ -1,8 +1,10 @@
 # Trust Boundaries
 
-**Status: identity/RBAC foundation Implemented (Phase 2A). Endpoint-specific
-authorization rules (e.g. refund ownership checks) remain Planned** since
-the endpoints they'd protect don't exist yet.
+**Status: identity/RBAC foundation Implemented (Phase 2A), first
+role-gated endpoints Implemented (Phase 2B, inventory-service).
+Endpoint-specific *ownership* authorization rules (e.g. refund ownership
+checks) remain Planned** since the endpoints they'd protect don't exist
+yet.
 
 ## Boundaries
 
@@ -11,22 +13,25 @@ flowchart LR
     subgraph untrusted[Untrusted]
         browser[Browser / API client]
     end
-    subgraph edge[Trust boundary: authentication — Implemented in auth-service]
+    subgraph edge[Trust boundary: authentication — Implemented in auth-service and inventory-service]
         authsvc["auth-service<br/>/api/v1/auth/register, /login (public)<br/>/api/v1/auth/me (JWT required)"]
+        inventorysvc["inventory-service<br/>product/stock writes: ADMIN only<br/>reads + reservations: any authenticated caller"]
         gateway["order-service public endpoints — Planned"]
     end
     subgraph internal[Trusted internal network]
-        inventory["inventory-service — Planned"]
         payment["payment-service — Planned"]
         notif["notification-consumer — Planned"]
-        pg[(PostgreSQL:<br/>fulfillx_auth, fulfillx_orders)]
+        pg[(PostgreSQL:<br/>fulfillx_auth, fulfillx_orders, fulfillx_inventory)]
         redis[(Redis — not yet used)]
         redpanda[[Redpanda — not yet used]]
     end
 
     browser -- "email+password, then JWT bearer token" --> authsvc
+    browser -- "JWT bearer token" --> inventorysvc
     browser -. "JWT bearer token — not yet enforced, no protected endpoints exist" .-> gateway
     authsvc --> pg
+    inventorysvc --> pg
+    inventorysvc -. "validates signature/expiry only, no network call" .-> authsvc
     gateway --> pg
 ```
 
@@ -34,19 +39,32 @@ flowchart LR
 
 | Role | Can do | Cannot do |
 |---|---|---|
-| `CUSTOMER` | Register, log in, view own identity (`/me`). Ordering endpoints: Planned. | Modify inventory, refund arbitrary orders, view other customers' orders (all Planned — no such endpoints exist yet to enforce this against) |
-| `OPERATOR` | Same as above today; fulfillment-state management: Planned | Manage products/inventory/refunds/audit access broadly |
-| `ADMIN` | Same as above today; product/inventory/refund/audit management: Planned | N/A |
+| `CUSTOMER` | Register, log in, view own identity (`/me`). Read products/inventory, create/release reservations (inventory-service). Ordering endpoints: Planned. | Create/modify products, adjust stock (inventory-service, `ADMIN` only), refund arbitrary orders, view other customers' orders (order-related checks Planned — no order endpoints exist yet to enforce this against) |
+| `OPERATOR` | Same as `CUSTOMER` today against inventory-service (no operator-specific inventory rule exists yet); fulfillment-state management: Planned | Create/modify products, adjust stock; manage refunds/audit access broadly |
+| `ADMIN` | Same as above today, plus product creation and stock adjustment in inventory-service; refund/audit management: Planned | N/A |
 
 Implemented today: the role model itself (`UserRole` enum, DB `CHECK`
-constraint, JWT `role` claim) and the fact that public registration always
-creates `CUSTOMER` — there is no endpoint that lets a caller self-assign
-`OPERATOR`/`ADMIN`. **Not yet implemented:** any endpoint that actually
-branches on role (e.g. `@PreAuthorize("hasRole('ADMIN')")`) — `auth-service`
-today only distinguishes "authenticated" from "not authenticated," not
-"authenticated as which role," at the authorization-decision level. That
-arrives with the endpoints roles are meant to gate (inventory, refunds,
-audit).
+constraint, JWT `role` claim); public registration always creates
+`CUSTOMER` — there is no endpoint that lets a caller self-assign
+`OPERATOR`/`ADMIN`; and, new in Phase 2B, **the first endpoints that
+actually branch on role** — inventory-service's `SecurityConfig` requires
+`hasRole("ADMIN")` for `POST /api/v1/products` and `POST
+/api/v1/inventory/{productId}/adjust`, proven by tests
+(`shouldRejectProductCreationByCustomer`,
+`shouldRejectStockAdjustmentByNonAdmin`). `auth-service` itself still only
+distinguishes "authenticated" from "not authenticated" at its own
+authorization-decision level — role-gating happens in the services that
+consume its tokens, not in auth-service.
+
+Inventory-service's reservation endpoints (`POST
+/api/v1/inventory/reservations` and its `/release` counterpart) are
+"any authenticated caller" rather than role- or identity-restricted — this
+is a **documented, temporary** limitation, not an oversight: there is no
+service-to-service authentication mechanism yet, and order-service (the
+eventual real caller) has no endpoint of its own to call from in this
+phase. See CLAUDE.md's Known Limitations and
+`docs/decisions/ADR-003-inventory-consistency-and-atomic-reservation.md`'s
+Consequences section.
 
 ## Current state
 
@@ -55,6 +73,11 @@ audit).
   default), issued only after password verification and an active-account
   check. JWT signing key comes from `AUTH_JWT_SECRET` with no hard-coded
   default — startup fails fast if it's unset.
+- **inventory-service validates those same JWTs locally**, offline — same
+  signing secret, signature/expiry verification only, no network call back
+  to auth-service on any request. This is the first proof that ADR-002's
+  identity pattern ("a valid JWT is itself the integrity proof") works for
+  a service other than the one that issued the token.
 - `order-service` still has no authentication of its own — it exposes only
   `/actuator/health`. Wiring order-service to validate auth-service-issued
   JWTs is Planned for Phase 2, when order-service gains endpoints worth

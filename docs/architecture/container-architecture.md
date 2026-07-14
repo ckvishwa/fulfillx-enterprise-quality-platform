@@ -1,9 +1,11 @@
 # Container Architecture
 
-**Status: mostly Planned.** Reflects the target architecture from the build
-brief (section 7). Only `order-service` (skeleton) and the three
-infrastructure containers (PostgreSQL, Redis, Redpanda) currently exist and
-run.
+**Status: partially Planned.** Reflects the target architecture from the
+build brief (section 7). `auth-service`, `inventory-service`, and
+`order-service` (skeleton) plus the three infrastructure containers
+(PostgreSQL, Redis, Redpanda) currently exist and run. `order-service` does
+not yet call `inventory-service` — no order-creation endpoint exists to do
+the calling from.
 
 ```mermaid
 flowchart TB
@@ -12,8 +14,8 @@ flowchart TB
     end
 
     subgraph services[Application Services]
-        auth[auth-service<br/>Planned]
-        inventory[inventory-service<br/>Planned]
+        auth["auth-service<br/>Implemented"]
+        inventory["inventory-service<br/>Implemented"]
         order["order-service<br/>Implemented (skeleton)"]
         payment[payment-service<br/>simulator — Planned]
         notif[notification-consumer<br/>Planned]
@@ -27,7 +29,7 @@ flowchart TB
 
     webportal --> auth
     webportal --> order
-    order --> inventory
+    order -. not yet wired .-> inventory
     order --> payment
     order -- publishes events --> redpanda
     redpanda -- consumes --> notif
@@ -35,6 +37,7 @@ flowchart TB
     order -. idempotency/locks .-> redis
     auth --> pg
     inventory --> pg
+    inventory -. validates JWTs from .-> auth
     payment --> pg
 ```
 
@@ -42,8 +45,10 @@ flowchart TB
 
 - **auth-service** — registration, login, password hashing, JWT issuance,
   roles (`CUSTOMER`, `OPERATOR`, `ADMIN`).
-- **inventory-service** — products, stock levels, reservation/release,
-  atomic stock updates, overselling prevention.
+- **inventory-service** (*implemented*) — products, stock levels,
+  reservation/release, atomic stock updates, overselling prevention. See
+  `docs/decisions/ADR-003-inventory-consistency-and-atomic-reservation.md`
+  for how the atomic-update and idempotency design works.
 - **order-service** (*only one implemented so far, and only as a skeleton*)
   — order lifecycle orchestration, idempotent creation, coordination with
   inventory/payment, cancellation, refund initiation, shipment state, audit
@@ -65,6 +70,12 @@ order-service) or events over Redpanda (asynchronous). See
 
 - `order-service`: Actuator health only, plus the `orders` table and JPA
   entity. No business endpoints yet.
+- `auth-service`: registration, login, `/me`, JWT issuance/validation, the
+  `CUSTOMER`/`OPERATOR`/`ADMIN` role model.
+- `inventory-service`: product and stock management, atomic idempotent
+  reservation and release, JWT validation (reusing auth-service's signing
+  secret, no network call to auth-service). Not yet called by any other
+  service — `order-service` has no reservation-triggering endpoint yet.
 - `docker-compose.yml`: PostgreSQL 18, Redis 8, Redpanda v26.1.12, each with
-  health checks. Validated to start healthy and to be reachable by
-  order-service.
+  health checks. Validated to start healthy and to be reachable by all
+  three application services.

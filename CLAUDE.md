@@ -63,12 +63,14 @@ Java). Never floating point.
 fulfillx-enterprise-quality-platform/
 ├── applications/
 │   ├── order-service/        # Implemented (skeleton). Others: Planned.
-│   └── auth-service/         # Implemented: register/login/me, JWT, RBAC foundation.
+│   ├── auth-service/         # Implemented: register/login/me, JWT, RBAC foundation.
+│   └── inventory-service/    # Implemented: products, inventory, atomic reservations.
 ├── quality-platform/          # Planned — not yet created (Phase 3+)
 ├── infrastructure/
-│   └── postgres/init/         # Implemented: creates the fulfillx_auth database
-│                               # (docker-compose otherwise lives at root per
-│                               # section 14 of the brief)
+│   └── postgres/init/         # Implemented: creates the fulfillx_auth and
+│                               # fulfillx_inventory databases (docker-compose
+│                               # otherwise lives at root per section 14 of
+│                               # the brief)
 ├── docs/
 │   ├── architecture/
 │   ├── business-risks/
@@ -88,9 +90,8 @@ fulfillx-enterprise-quality-platform/
 **Deviation from the brief's suggested tree, documented:** `applications/`,
 `quality-platform/`, and `defects/` are intentionally **not** pre-created as
 empty directories for services/modules that don't exist yet
-(`auth-service`, `inventory-service`, `payment-service`,
-`notification-consumer`, `web-portal`, every `quality-platform/*` subtree,
-every `defects/FX-*` folder). Creating empty placeholder folders and
+(`payment-service`, `notification-consumer`, `web-portal`, every
+`quality-platform/*` subtree, every `defects/FX-*` folder). Creating empty placeholder folders and
 describing them as scaffolded modules is an explicitly prohibited shortcut
 (section 32 of the brief). Each of those appears in this repo's tree the
 same phase it gets real content.
@@ -214,8 +215,9 @@ capabilities that don't exist in the repo yet.
 
 ## 15. Current project phase
 
-**Phase 0, the smallest safe slice of Phase 1, and Phase 2A (authentication
-and identity foundation) are complete.**
+**Phase 0, the smallest safe slice of Phase 1, Phase 2A (authentication and
+identity foundation), and Phase 2B (product and inventory foundation) are
+complete.**
 
 Implemented (Phase 0/1):
 - Git repository, `.gitignore`, `.gitattributes`, this file, root README,
@@ -255,15 +257,46 @@ Implemented (Phase 2A):
   test, all passing. See
   `docs/traceability/risk-to-test-traceability.md` for the mapping.
 
-Not yet built (do not claim otherwise): inventory/payment/notification
-services, any order business API beyond `/actuator/health` (order
-creation, reservation, payment, cancellation, refund), request-time
-JWT-based customer-identity validation in order-service (the ADR-002
-integrity mechanism is designed but not wired up — no order-creation
-endpoint exists yet to do the validating), the order state-transition
-guard logic, an admin/operator endpoint to provision `OPERATOR`/`ADMIN`
-accounts or to lock/disable a user, the web portal, the quality-platform
-Java/Playwright/Pact/k6 frameworks, the outbox pattern, seeded defects.
+Implemented (Phase 2B):
+- `inventory-service`: Spring Boot 4.1.0, Spring Security (stateless, JWT
+  bearer auth validating auth-service-issued tokens locally), `products`/
+  `inventory_items`/`inventory_reservations` tables via Flyway V1
+  migration in its own `fulfillx_inventory` database.
+- Endpoints: `POST /api/v1/products`, `GET /api/v1/products/{id}`,
+  `GET /api/v1/products`, `POST /api/v1/inventory/{productId}/adjust`,
+  `GET /api/v1/inventory/{productId}`, `POST /api/v1/inventory/reservations`,
+  `POST /api/v1/inventory/reservations/{id}/release`, plus restricted
+  Actuator health.
+- Atomic, idempotent stock reservation proven safe under real concurrency:
+  a single conditional `UPDATE ... WHERE available_quantity >= :quantity`
+  (no read-then-write), with a deterministic Testcontainers-backed test
+  (`ConcurrentReservationIntegrationTest`) proving exactly 5 of 20
+  concurrent 1-unit reservation attempts succeed against 5 units of stock.
+  See `docs/decisions/ADR-003-inventory-consistency-and-atomic-reservation.md`.
+- Idempotency-key-protected reservation creation (same key + same data ->
+  same reservation, no double-reservation; same key + different data ->
+  `IDEMPOTENCY_CONFLICT`) and idempotent reservation release (repeated
+  release never double-restores stock).
+- `docker-compose.yml` now provisions a third logical database
+  (`fulfillx_inventory`) via `infrastructure/postgres/init/`; all three
+  services remain on separate databases with no physical cross-service
+  foreign keys.
+- 36 new tests in inventory-service (32 integration via Testcontainers
+  PostgreSQL 18, including the concurrency proof; 4 unit for JWT
+  validate/expire/tamper/wrong-signer), all passing. See
+  `docs/traceability/risk-to-test-traceability.md` for the mapping.
+
+Not yet built (do not claim otherwise): payment/notification services, any
+order business API beyond `/actuator/health` (order creation, reservation,
+payment, cancellation, refund), request-time JWT-based customer-identity
+validation in order-service (the ADR-002 integrity mechanism is designed
+but not wired up — no order-creation endpoint exists yet to do the
+validating), the order state-transition guard logic, an admin/operator
+endpoint to provision `OPERATOR`/`ADMIN` accounts or to lock/disable a
+user, service-to-service authentication for inventory-service's
+reservation endpoints (see Known Limitations), the web portal, the
+quality-platform Java/Playwright/Pact/k6 frameworks, the outbox pattern,
+seeded defects.
 
 ## 16. Known limitations
 
@@ -305,24 +338,46 @@ Java/Playwright/Pact/k6 frameworks, the outbox pattern, seeded defects.
   simplification (ADR-002), not a production security decision.
 - CI (`.github/workflows/pr.yml`) runs `./mvnw clean verify` at the repo
   root, which now builds and tests the full reactor (order-service +
-  auth-service) — this has been verified **locally** but the workflow
-  itself has not yet actually run on GitHub Actions (no push to a remote
-  has triggered it).
+  auth-service + inventory-service) — this has been verified **locally**
+  but the workflow itself has not yet actually run on GitHub Actions for
+  this phase's changes (no push to a remote has triggered it yet).
+- inventory-service's reservation and release endpoints require only "any
+  authenticated caller," not a specific internal-service identity — there
+  is no service-to-service authentication mechanism yet, and
+  order-service (the eventual real caller) has no endpoint of its own to
+  call from in this phase. See
+  `docs/architecture/trust-boundaries.md` and ADR-003's consequences
+  section. This is an authorization gap, not a data-consistency gap.
+- inventory-service's stock adjustment endpoint (`POST
+  /api/v1/inventory/{productId}/adjust`) only increases stock in this
+  phase — a negative delta is rejected as `INVALID_QUANTITY`. Decreasing
+  stock outside of a reservation is out of scope; there is no
+  "correction downward" or "write-off" operation yet.
+- `inventory_reservations.order_reference` has no physical foreign key to
+  order-service's `orders` table, for the same reason `orders.customer_id`
+  has none to auth-service's `users` table (separate databases; see
+  ADR-002) — and additionally because order-service does not yet have any
+  endpoint that would create real order references to reserve against.
+- inventory-service, auth-service, and order-service share one Postgres
+  superuser credential pair in local dev (`fulfillx`/`fulfillx`) rather
+  than distinct least-privilege roles per database — the same documented
+  local-dev simplification as ADR-002, extended to the third database.
 
 ## 17. Required validation commands
 
 ```bash
 ./mvnw -B clean verify        # compiles and tests the full reactor (needs Docker)
 docker compose config          # validate compose syntax
-docker compose up -d           # start Postgres (creates fulfillx_auth on first init), Redis, Redpanda
+docker compose up -d           # start Postgres (creates fulfillx_auth + fulfillx_inventory on first init), Redis, Redpanda
 docker compose ps              # confirm all three report healthy
-docker compose down            # stop (add -v only if volumes should be wiped, e.g. to re-trigger the auth-db init script)
+docker compose down            # stop (add -v only if volumes should be wiped, e.g. to re-trigger the postgres init scripts)
 ```
 
 Note: `infrastructure/postgres/init/` only runs against a **fresh**
 `postgres-data` volume. If that volume already exists from before
-`fulfillx_auth` was introduced, run `docker compose down -v` once to pick
-up the new database before `auth-service` can connect.
+`fulfillx_auth` or `fulfillx_inventory` was introduced, run `docker compose
+down -v` once to pick up the new database(s) before the corresponding
+service can connect.
 
 ## 18. Common development commands
 
@@ -336,22 +391,26 @@ system-wide Maven install is assumed or required.
 # Build/test a single module only (-am also builds its dependencies)
 ./mvnw -pl applications/auth-service -am clean verify
 ./mvnw -pl applications/order-service -am clean verify
+./mvnw -pl applications/inventory-service -am clean verify
 
 # Run a single test class
 ./mvnw -pl applications/auth-service test -Dtest=JwtServiceTest
+./mvnw -pl applications/inventory-service test -Dtest=ConcurrentReservationIntegrationTest
 
 # Run a single test method
 ./mvnw -pl applications/auth-service test -Dtest=AuthApiIntegrationTest#shouldRejectMeWithoutToken
 
 # Run one service locally against docker-compose infra (see section 17
 # to start that infra first)
-cd applications/order-service && ../../mvnw spring-boot:run   # port 8081
-cd applications/auth-service && ../../mvnw spring-boot:run    # port 8083, needs AUTH_JWT_SECRET set (see .env.example)
+cd applications/order-service && ../../mvnw spring-boot:run       # port 8081
+cd applications/auth-service && ../../mvnw spring-boot:run        # port 8083, needs AUTH_JWT_SECRET set (see .env.example)
+cd applications/inventory-service && ../../mvnw spring-boot:run   # port 8085, needs AUTH_JWT_SECRET set (must match auth-service's — see .env.example)
 ```
 
-Integration tests in both modules use Testcontainers and therefore need a
-running Docker daemon — there is no way to skip that and still exercise
-real PostgreSQL behavior (see section 6, "no H2 as the only proof").
+Integration tests in all three modules use Testcontainers and therefore
+need a running Docker daemon — there is no way to skip that and still
+exercise real PostgreSQL behavior (see section 6, "no H2 as the only
+proof").
 
 No linter, formatter, or static-analysis tool (Checkstyle/Spotless/
 SpotBugs/dependency-check) is configured yet, despite being named in the
@@ -395,17 +454,58 @@ copy patterns from:
   platform-wide error contract (see section 8's API design standards in
   the original brief, preserved in ADR-001).
 
-**Cross-service architecture, not visible from either package tree alone**
+**`inventory-service`** (`com.fulfillx.inventoryservice`) — the first
+service to validate JWTs it did not issue:
+- `product/` — `Product` entity, `ProductRepository`, `ProductService`
+  (SKU/currency normalization, product+inventory-row creation in one
+  transaction), exceptions (`ProductNotFoundException`,
+  `SkuAlreadyExistsException`, `InvalidProductRequestException`);
+  `product/api/` holds `ProductController` and request/response records.
+- `inventory/` — `InventoryItem` entity, `InventoryItemRepository` (the
+  atomic conditional-UPDATE methods central to ADR-003:
+  `reserveAtomically`, `releaseAtomically`, `adjustAtomically`),
+  `InventoryService` (stock adjustment — increase-only in this phase),
+  exceptions (`InventoryNotFoundException`, `InvalidQuantityException`);
+  `inventory/api/` holds `InventoryController` and request/response
+  records.
+- `reservation/` — `InventoryReservation` entity + `ReservationStatus`
+  enum, `InventoryReservationRepository`, `ReservationWriter` (the atomic,
+  `@Transactional` reserve/release operations — a bean deliberately
+  separate from `ReservationService` to keep Spring's transactional proxy
+  boundary real, see its Javadoc and ADR-003), `ReservationService`
+  (idempotency-key orchestration on top of `ReservationWriter`),
+  exceptions (`InsufficientInventoryException`,
+  `ReservationNotFoundException`, `IdempotencyConflictException`);
+  `reservation/api/` holds `ReservationController` and request/response
+  records.
+- `security/` — `JwtService` here only *validates* (no `issue()` method,
+  unlike auth-service's) tokens signed with the same `AUTH_JWT_SECRET`
+  auth-service uses, entirely offline; `JwtProperties`,
+  `JwtAuthenticationFilter`, `SecurityConfig`,
+  `RestAuthenticationEntryPoint`, `RestAccessDeniedHandler` all mirror
+  auth-service's shapes and responsibilities.
+- `web/` — `CorrelationIdFilter`/`CorrelationIdSupport`, `ErrorResponse` +
+  `GlobalExceptionHandler` (adds inventory-specific codes:
+  `PRODUCT_NOT_FOUND`, `SKU_ALREADY_EXISTS`, `INVENTORY_NOT_FOUND`,
+  `INVALID_QUANTITY`, `INSUFFICIENT_INVENTORY`, `RESERVATION_NOT_FOUND`,
+  `IDEMPOTENCY_CONFLICT`), `WebConfig` — all mirror auth-service's `web/`
+  package.
+
+**Cross-service architecture, not visible from any single package tree**
 (see the ADRs for the reasoning):
-- `order-service` and `auth-service` use **separate logical PostgreSQL
-  databases** (`fulfillx_orders` / `fulfillx_auth`) in the same
-  docker-compose container, with **no physical foreign key** between them
-  — `orders.customer_id` is only documented (via `COMMENT ON COLUMN` in
+- `order-service`, `auth-service`, and `inventory-service` use **separate
+  logical PostgreSQL databases** (`fulfillx_orders` / `fulfillx_auth` /
+  `fulfillx_inventory`) in the same docker-compose container, with **no
+  physical foreign key** between any of them — `orders.customer_id` is
+  only documented (via `COMMENT ON COLUMN` in
   `V2__document_customer_identity_reference.sql`) as referencing
-  `auth-service`'s `users.id`. Integrity is meant to be established by
-  validating a `auth-service`-issued JWT at request time, not by a
-  database constraint (see ADR-002) — this isn't wired up yet because
-  order-service has no endpoints to protect.
+  `auth-service`'s `users.id`, and `inventory_reservations.order_reference`
+  has no FK target at all yet (order-service has no order-creation
+  endpoint to produce real references). Identity integrity is meant to be
+  established by validating an `auth-service`-issued JWT at request time,
+  not by a database constraint (see ADR-002) — `inventory-service` is the
+  first service other than auth-service to actually do this validation
+  (see ADR-003 for the atomic-reservation half of this phase's design).
 - Every Flyway migration lives at
   `applications/<service>/src/main/resources/db/migration/`, versioned
   independently per service (each has its own `flyway_schema_history`

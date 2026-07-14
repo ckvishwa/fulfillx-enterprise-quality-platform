@@ -1,0 +1,9 @@
+# Activated via @ActiveProfiles("test"); layers on top of
+# src/main/resources/application.yml rather than replacing it. Datasource is
+# supplied by Testcontainers via @ServiceConnection in each test class; only
+# the JWT secret needs a fixed value here so tests don't depend on a real
+# environment's AUTH_JWT_SECRET being set. Must match
+# support/TestTokens.TEST_JWT_SECRET.
+auth:
+  jwt:
+    secret: "test-only-secret-never-used-outside-this-test-suite-32bytes-min"

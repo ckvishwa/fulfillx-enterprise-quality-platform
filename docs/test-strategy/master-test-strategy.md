@@ -11,13 +11,13 @@ is a byproduct of covering real risk, not a quota to hit.
 
 | Layer | Tool | What it proves | Status |
 |---|---|---|---|
-| Unit/domain | JUnit 5 + AssertJ | Domain rules in isolation (e.g. JWT issue/expire/tamper in `JwtServiceTest`; order state-transition guards remain Planned for Phase 2) | **Started** |
-| Integration | JUnit 5 + Testcontainers | Real behavior against real PostgreSQL/Redis/Redpanda, not mocks | **Started** — `OrderPersistenceIntegrationTest` and `AuthApiIntegrationTest` both run against real Testcontainers PostgreSQL 18 instances |
+| Unit/domain | JUnit 5 + AssertJ | Domain rules in isolation (e.g. JWT issue/expire/tamper in `JwtServiceTest` in both auth-service and inventory-service; order state-transition guards remain Planned for Phase 2) | **Started** |
+| Integration | JUnit 5 + Testcontainers | Real behavior against real PostgreSQL/Redis/Redpanda, not mocks | **Started** — `OrderPersistenceIntegrationTest`, `AuthApiIntegrationTest`, and inventory-service's `ProductApiIntegrationTest`/`InventoryApiIntegrationTest`/`ReservationApiIntegrationTest` all run against real Testcontainers PostgreSQL 18 instances |
 | API | REST Assured + JUnit 5 + Allure | Contract-level behavior of each service's HTTP API, including negative/authz cases | Planned (Phase 3) |
 | UI | Playwright + TypeScript | Critical user-visible flows, authorization boundaries, accessibility, premature-success prevention | Planned (Phase 5) |
 | Contract | Pact | Independently-deployable service boundaries don't break each other | Planned (Phase 6) |
 | Event | JUnit 5 + Testcontainers (Redpanda) | Duplicate/out-of-order/poison/restart/eventual-consistency behavior | Planned (Phase 7) |
-| Concurrency | JUnit 5 (deterministic concurrency harness) | Inventory races, duplicate submission, payment uncertainty, compensation, restart recovery | Planned (Phase 8) |
+| Concurrency | JUnit 5 (deterministic concurrency harness) | Inventory races, duplicate submission, payment uncertainty, compensation, restart recovery | **Started** — RISK-01 (inventory overselling) proven by `ConcurrentReservationIntegrationTest` in Phase 2B, ahead of the originally planned Phase 8, since inventory-service's core invariant needed the proof as soon as reservation existed. Duplicate submission/payment uncertainty/compensation/restart concurrency scenarios remain Planned (Phase 8). |
 | Performance | k6 | Latency/throughput *and* business correctness under load (e.g. inventory must not go negative even if throughput looks fine) | Planned (Phase 9) |
 
 ## Non-negotiable rules
@@ -39,9 +39,10 @@ is a byproduct of covering real risk, not a quota to hit.
 
 `.github/workflows/pr.yml` runs `./mvnw clean verify` at the repo root,
 which now builds and tests the **full reactor** (`order-service` +
-`auth-service` — 3 + 16 tests respectively as of Phase 2A), including every
-Testcontainers-backed integration test. This has been verified locally;
-the workflow itself has not yet actually run on GitHub Actions. As layers
+`auth-service` + `inventory-service` — 3 + 16 + 36 tests respectively as of
+Phase 2B), including every Testcontainers-backed integration test. This
+has been verified locally; the workflow itself has not yet actually run on
+GitHub Actions for this phase's changes. As layers
 are added (API, event, concurrency, contract), they join the PR pipeline
 per the target sequence in the original build brief (section 24):
 formatting → static analysis → unit → build → Testcontainers integration →
