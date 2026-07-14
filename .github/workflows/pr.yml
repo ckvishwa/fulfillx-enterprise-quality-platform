@@ -2,14 +2,20 @@ name: Pull Request Build
 
 on:
   pull_request:
-    branches: [main, master]
+    branches:
+      - main
   push:
-    branches: [main, master]
+    branches:
+      - main
+
+permissions:
+  contents: read
 
 jobs:
   build-and-test:
-    name: Compile and run tests (full reactor: order-service, auth-service)
+    name: "Compile and run tests (full reactor: order-service, auth-service)"
     runs-on: ubuntu-latest
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -21,7 +27,8 @@ jobs:
           java-version: "21"
           cache: maven
 
+      - name: Make Maven wrapper executable
+        run: chmod +x mvnw
+
       - name: Compile and run tests
-        # Testcontainers-backed tests need Docker, which is preinstalled on
-        # GitHub-hosted ubuntu-latest runners.
         run: ./mvnw --batch-mode --no-transfer-progress clean verify
