@@ -1,0 +1,11 @@
+-- Runs once, only when the postgres-data volume is freshly initialized
+-- (docker-entrypoint-initdb.d scripts do not re-run against existing data).
+--
+-- FulfillX gives each service its own logical PostgreSQL database within
+-- the single shared local-dev Postgres container, rather than a shared
+-- schema. This is a deliberate service-boundary decision, not an
+-- afterthought: PostgreSQL cannot enforce a foreign key across databases,
+-- which makes "no physical cross-service foreign key" a technical fact
+-- rather than just a convention. See
+-- docs/decisions/ADR-002-identity-and-cross-service-data-ownership.md.
+CREATE DATABASE fulfillx_auth;

@@ -8,7 +8,7 @@ on:
 
 jobs:
   build-and-test:
-    name: Compile and run tests (order-service)
+    name: Compile and run tests (full reactor: order-service, auth-service)
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
