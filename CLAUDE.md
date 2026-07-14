@@ -323,3 +323,90 @@ Note: `infrastructure/postgres/init/` only runs against a **fresh**
 `postgres-data` volume. If that volume already exists from before
 `fulfillx_auth` was introduced, run `docker compose down -v` once to pick
 up the new database before `auth-service` can connect.
+
+## 18. Common development commands
+
+Always use `./mvnw` (the committed Maven Wrapper), never a bare `mvn` — no
+system-wide Maven install is assumed or required.
+
+```bash
+# Full reactor build + test (what CI runs)
+./mvnw -B clean verify
+
+# Build/test a single module only (-am also builds its dependencies)
+./mvnw -pl applications/auth-service -am clean verify
+./mvnw -pl applications/order-service -am clean verify
+
+# Run a single test class
+./mvnw -pl applications/auth-service test -Dtest=JwtServiceTest
+
+# Run a single test method
+./mvnw -pl applications/auth-service test -Dtest=AuthApiIntegrationTest#shouldRejectMeWithoutToken
+
+# Run one service locally against docker-compose infra (see section 17
+# to start that infra first)
+cd applications/order-service && ../../mvnw spring-boot:run   # port 8081
+cd applications/auth-service && ../../mvnw spring-boot:run    # port 8083, needs AUTH_JWT_SECRET set (see .env.example)
+```
+
+Integration tests in both modules use Testcontainers and therefore need a
+running Docker daemon — there is no way to skip that and still exercise
+real PostgreSQL behavior (see section 6, "no H2 as the only proof").
+
+No linter, formatter, or static-analysis tool (Checkstyle/Spotless/
+SpotBugs/dependency-check) is configured yet, despite being named in the
+original brief's tech stack — don't claim one runs in CI or locally until
+one is actually added to the POMs.
+
+## 19. Service internals (package map)
+
+Both services follow the same internal shape; once you understand one,
+the other reads the same way.
+
+**`order-service`** (`com.fulfillx.orderservice`) — deliberately minimal
+right now:
+- `order/` — the entire service: `Order` (JPA entity), `OrderStatus`
+  (enum — full state space defined, but transition *guards* aren't
+  implemented yet, see `docs/architecture/order-lifecycle.md`),
+  `OrderRepository`.
+- No controllers, no service layer yet — there is no order business API,
+  only Actuator health.
+
+**`auth-service`** (`com.fulfillx.authservice`) — the fuller example to
+copy patterns from:
+- `user/` — persistence: `User` entity, `UserRole`/`UserStatus` enums,
+  `UserRepository`.
+- `auth/` — business logic: `AuthenticationService` (register/login/
+  currentUser) and its exceptions (`EmailAlreadyRegisteredException`,
+  `InvalidCredentialsException`, `AccountNotActiveException`); `auth/api/`
+  holds the HTTP-facing pieces (`AuthController`, request/response
+  records).
+- `security/` — JWT issuance/validation (`JwtService`, `JwtProperties`),
+  the filter that resolves a principal from a bearer token
+  (`JwtAuthenticationFilter`), and the Spring Security wiring
+  (`SecurityConfig`, `RestAuthenticationEntryPoint`,
+  `RestAccessDeniedHandler` — these last two exist so that authentication/
+  authorization failures at the filter-chain level get the same JSON error
+  shape as everything else, not Spring Security's default response).
+- `web/` — cross-cutting concerns any future service should replicate:
+  `CorrelationIdFilter` (+ `CorrelationIdSupport`) propagates
+  `X-Correlation-Id` through MDC so it shows up in every log line and
+  error response; `ErrorResponse` + `GlobalExceptionHandler` implement the
+  platform-wide error contract (see section 8's API design standards in
+  the original brief, preserved in ADR-001).
+
+**Cross-service architecture, not visible from either package tree alone**
+(see the ADRs for the reasoning):
+- `order-service` and `auth-service` use **separate logical PostgreSQL
+  databases** (`fulfillx_orders` / `fulfillx_auth`) in the same
+  docker-compose container, with **no physical foreign key** between them
+  — `orders.customer_id` is only documented (via `COMMENT ON COLUMN` in
+  `V2__document_customer_identity_reference.sql`) as referencing
+  `auth-service`'s `users.id`. Integrity is meant to be established by
+  validating a `auth-service`-issued JWT at request time, not by a
+  database constraint (see ADR-002) — this isn't wired up yet because
+  order-service has no endpoints to protect.
+- Every Flyway migration lives at
+  `applications/<service>/src/main/resources/db/migration/`, versioned
+  independently per service (each has its own `flyway_schema_history`
+  table, in its own database).
