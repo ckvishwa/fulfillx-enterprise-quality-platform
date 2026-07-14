@@ -8,6 +8,7 @@ not start automatically. See `CLAUDE.md` section 13.
 | 0 | Repository operating system | **Complete** |
 | 1 | Executable infrastructure foundation (smallest safe slice) | **Complete** |
 | 2A | Authentication and identity foundation | **Complete** |
+| 2B | Product and inventory foundation | **Complete** |
 | 2 | First complete vertical slice (register → order → payment → confirm → event → audit) | Next (awaiting approval) |
 | 3 | API quality framework (REST Assured + JUnit 5 + Allure) | Planned |
 | 4 | Real integration platform (expanded Testcontainers coverage) | Planned |
@@ -40,14 +41,37 @@ delivered (intentionally, per the phase's own scope boundary): order
 business logic, inventory, payment, event messaging, the web portal, and
 the REST Assured framework.
 
+## Phase 2B completion summary
+
+See the phase completion report delivered at the end of that run for the
+full executive summary, files created/modified, validation results, known
+limitations, and git status. Delivered: `inventory-service` (products,
+inventory quantities, atomic reservation, idempotent reservation release,
+JWT validation reusing auth-service's signing secret), a
+products/inventory_items/inventory_reservations Flyway migration, a third
+logical Postgres database (`fulfillx_inventory`), ADR-003 (inventory
+consistency and atomic reservation), and 36 new tests including a
+deterministic Testcontainers-backed concurrency proof (20 concurrent
+1-unit reservation attempts against 5 units of stock -> exactly 5
+successes, 15 controlled failures, zero overselling). Not delivered
+(intentionally, per the phase's own scope boundary): order creation,
+payment-service, refunds, shipment processing, Redpanda producers/
+consumers, notification-consumer, the web portal, REST Assured/
+Playwright/Pact/k6, Redis locking, saga orchestration, the outbox pattern,
+and service-to-service authentication for inventory-service's reservation
+endpoints (documented as a temporary limitation, closed when Phase 2 gives
+order-service a caller-side identity to present).
+
 ## Phase 2 scope (proposed, not started)
 
 Per the original build brief, Phase 2 ("First complete vertical slice") is
 the next phase pending approval. Expected scope: order creation wired to
 authenticated auth-service identities (closing the request-time integrity
-gap noted in ADR-002 and `CLAUDE.md`'s Known Limitations), product/
-inventory basics, payment authorization against the (still to be built)
-payment simulator, order confirmation, event publication, and audit
-history. This is a proposal for discussion, not a commitment — the actual
-Phase 2 slice will be scoped explicitly when that phase begins, following
-the same audit-report-propose-wait pattern used for prior phases.
+gap noted in ADR-002 and `CLAUDE.md`'s Known Limitations), order-service
+calling inventory-service's reservation API (closing inventory-service's
+own service-to-service authentication gap from Phase 2B), payment
+authorization against the (still to be built) payment simulator, order
+confirmation, event publication, and audit history. This is a proposal for
+discussion, not a commitment — the actual Phase 2 slice will be scoped
+explicitly when that phase begins, following the same
+audit-report-propose-wait pattern used for prior phases.

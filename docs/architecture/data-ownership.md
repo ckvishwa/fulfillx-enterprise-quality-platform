@@ -31,12 +31,15 @@
 | `fulfillx_orders` | `flyway_schema_history` | order-service (Flyway-managed) | Standard Flyway bookkeeping table. |
 | `fulfillx_auth` | `users` | auth-service | V1 migration. Normalized unique email, BCrypt `password_hash`, `role`/`status` `CHECK` constraints, optimistic-lock `version`. |
 | `fulfillx_auth` | `flyway_schema_history` | auth-service (Flyway-managed) | Independent from order-service's — different database entirely. |
+| `fulfillx_inventory` | `products` | inventory-service | V1 migration. Normalized unique `sku`, nonnegative `price_minor`, three-letter `currency` format `CHECK`. |
+| `fulfillx_inventory` | `inventory_items` | inventory-service | V1 migration. One row per product (FK to `products.id` within the same database), `available_quantity`/`reserved_quantity` nonnegative `CHECK` constraints — the enforced backstop for RISK-01. |
+| `fulfillx_inventory` | `inventory_reservations` | inventory-service | V1 migration. Unique `idempotency_key`, `status` `CHECK` (`RESERVED`/`RELEASED`), `order_reference` has **no physical FK** — order-service has no order-creation endpoint yet to produce real references, and even once it does, the same cross-database rationale as `orders.customer_id` applies. |
+| `fulfillx_inventory` | `flyway_schema_history` | inventory-service (Flyway-managed) | Independent from the other two — different database entirely. |
 
 ## Target ownership (planned, not yet built)
 
 | Table(s) | Owning service |
 |---|---|
-| `products`, `inventory_items`, `reservations` | inventory-service |
 | `order_line_items`, `shipments`, `audit_entries` | order-service |
 | `payment_operations`, `refunds` | payment-service |
 | `notifications`, `dead_letter_entries` | notification-consumer |
@@ -49,6 +52,8 @@ reads/writes go through that service's HTTP API (synchronous) or through
 events on Redpanda (asynchronous) — or, for identity specifically, through
 a JWT that auth-service issued, which other services can validate locally
 (signature + expiry) without calling back to auth-service or its database
-at all. This last pattern is designed (see ADR-002) but not yet wired up:
-`order-service` doesn't validate JWTs yet because it has no endpoints worth
-protecting.
+at all. This pattern (designed in ADR-002) is now actually implemented by
+`inventory-service`, the first service other than auth-service to validate
+JWTs — see `docs/decisions/ADR-003-inventory-consistency-and-atomic-reservation.md`.
+`order-service` still doesn't validate JWTs yet because it has no
+endpoints worth protecting.
