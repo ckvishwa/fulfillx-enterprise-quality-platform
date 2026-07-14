@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Root aggregator POM for the FulfillX Enterprise Quality Engineering Platform.
+
+  This POM does NOT act as a Maven parent for inheritance. It exists purely to
+  let `./mvnw` build the whole reactor (applications + eventual quality-platform
+  Java modules) from the repository root. Each module chooses its own real
+  parent (e.g. applications/order-service inherits from
+  spring-boot-starter-parent) because the quality-platform modules are not
+  Spring Boot applications and must not inherit Spring Boot's dependency
+  management.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>com.fulfillx</groupId>
+  <artifactId>fulfillx-platform</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+  <packaging>pom</packaging>
+
+  <name>FulfillX Enterprise Quality Engineering Platform</name>
+  <description>
+    Reactor aggregator for the FulfillX distributed order-fulfillment system
+    and the quality-engineering platform that validates it.
+  </description>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+    <java.version>21</java.version>
+  </properties>
+
+  <modules>
+    <module>applications/order-service</module>
+  </modules>
+
+</project>
