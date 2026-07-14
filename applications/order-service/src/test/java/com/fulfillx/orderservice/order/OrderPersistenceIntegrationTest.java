@@ -33,7 +33,7 @@ class OrderPersistenceIntegrationTest {
 
     @Container
     @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:18-alpine");
 
     @Autowired
     private OrderRepository orderRepository;
@@ -78,6 +78,27 @@ class OrderPersistenceIntegrationTest {
                 1_000L, 80L, 1_080L, UUID.randomUUID());
 
         assertThatThrownBy(() -> orderRepository.saveAndFlush(duplicate))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    /**
+     * order-service has no physical foreign key from {@code customer_id} to
+     * auth-service's {@code users} table by design — they are separate
+     * databases specifically so that coupling is impossible, not just
+     * discouraged. See
+     * docs/decisions/ADR-002-identity-and-cross-service-data-ownership.md.
+     * The database-layer integrity check available here is therefore
+     * {@code NOT NULL}; true referential integrity is established at
+     * request time by validating the caller's auth-service-issued JWT,
+     * once an order-creation endpoint exists to do so.
+     */
+    @Test
+    void shouldRejectOrderWithoutACustomerIdentityReference() {
+        Order order = new Order(
+                null, "idem-" + UUID.randomUUID(), OrderStatus.CREATED, "USD",
+                1_000L, 80L, 1_080L, UUID.randomUUID());
+
+        assertThatThrownBy(() -> orderRepository.saveAndFlush(order))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 }
