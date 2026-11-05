@@ -29,6 +29,11 @@ public final class TestTokens {
         return tokenFor("ADMIN");
     }
 
+    /** Internal role permitted to create and release reservations. */
+    public static String operatorToken() {
+        return tokenFor("OPERATOR");
+    }
+
     public static String customerToken() {
         return tokenFor("CUSTOMER");
     }

@@ -208,8 +208,10 @@ reflecting the row the bulk UPDATE just changed.
   rather than executing in parallel. This is the intended behavior for
   the invariant this phase protects, and is proven bounded and correct by
   `ConcurrentReservationIntegrationTest`, not just assumed.
-- Reservation and release are only "any authenticated caller" in this
-  phase, not restricted to a specific internal service identity — see
+- Reservation and release are restricted to the `OPERATOR`/`ADMIN` roles
+  (originally "any authenticated caller", which let a `CUSTOMER` release
+  another customer's reservation), not to a specific internal service
+  identity — see
   `docs/architecture/trust-boundaries.md` and CLAUDE.md's Known
   Limitations. This is an authorization gap, not a consistency gap: it
   does not weaken the atomicity guarantees described here.

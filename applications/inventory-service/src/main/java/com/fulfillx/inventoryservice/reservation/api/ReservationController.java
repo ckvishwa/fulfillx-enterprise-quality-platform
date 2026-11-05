@@ -14,11 +14,10 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Reservation creation and release are treated as "any authenticated
- * caller" rather than a specific internal-service identity — there is no
- * service-to-service authentication mechanism yet (order-service has no
- * caller-side endpoint of its own in this phase). This is a documented,
- * temporary limitation; see CLAUDE.md's Known Limitations and
+ * Reservation creation and release require {@code OPERATOR} or
+ * {@code ADMIN} (see {@code SecurityConfig}); there is no
+ * service-to-service identity yet, so the internal roles stand in for the
+ * eventual order-service caller. See CLAUDE.md's Known Limitations and
  * docs/architecture/trust-boundaries.md.
  */
 @RestController
