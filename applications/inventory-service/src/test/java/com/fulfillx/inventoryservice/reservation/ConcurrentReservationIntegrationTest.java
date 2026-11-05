@@ -83,7 +83,7 @@ class ConcurrentReservationIntegrationTest {
                                 "quantity", 1,
                                 "idempotencyKey", "concurrency-key-" + UUID.randomUUID()));
                         return mockMvc.perform(post("/api/v1/inventory/reservations")
-                                        .header("Authorization", "Bearer " + TestTokens.customerToken())
+                                        .header("Authorization", "Bearer " + TestTokens.operatorToken())
                                         .contentType(MediaType.APPLICATION_JSON)
                                         .content(body))
                                 .andReturn().getResponse().getStatus();

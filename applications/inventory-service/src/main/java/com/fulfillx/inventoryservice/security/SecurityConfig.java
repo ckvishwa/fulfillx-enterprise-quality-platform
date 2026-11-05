@@ -14,13 +14,11 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
  * <ul>
  *   <li>{@code /actuator/health} — public.</li>
  *   <li>{@code POST /api/v1/products} and stock adjustment — {@code ADMIN} only.</li>
- *   <li>Product/inventory reads and reservation create/release — any
- *       authenticated caller. Reservation operations are documented in
- *       CLAUDE.md as a temporary limitation: there is no service-to-service
- *       authentication mechanism yet (order-service has no endpoints of its
- *       own to call from), so "authenticated" is the strongest check
- *       available today rather than restricting to a specific internal
- *       identity.</li>
+ *   <li>Product/inventory reads — any authenticated caller.</li>
+ *   <li>Reservation create/release — {@code OPERATOR} or {@code ADMIN}.
+ *       There is no service-to-service authentication yet, so the internal
+ *       roles stand in for "the order flow"; a {@code CUSTOMER} must never
+ *       reserve or release directly (reservations have no customer owner).</li>
  * </ul>
  * inventory-service never issues JWTs itself; it only validates tokens
  * auth-service already issued (see {@link JwtService}).
@@ -51,6 +49,13 @@ public class SecurityConfig {
                         .requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/products").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/v1/inventory/*/adjust").hasRole("ADMIN")
+                        // Reservations carry no customer owner, so "any authenticated caller"
+                        // let a CUSTOMER release another customer's reservation or hold stock
+                        // without an order. Until service-to-service auth exists, only the
+                        // internal roles may reserve or release.
+                        .requestMatchers(HttpMethod.POST,
+                                "/api/v1/inventory/reservations", "/api/v1/inventory/reservations/*/release")
+                        .hasAnyRole("OPERATOR", "ADMIN")
                         .anyRequest().authenticated())
                 .exceptionHandling(exceptions -> exceptions
                         .authenticationEntryPoint(authenticationEntryPoint)

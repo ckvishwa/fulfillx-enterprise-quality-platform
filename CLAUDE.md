@@ -341,13 +341,16 @@ seeded defects.
   auth-service + inventory-service) — this has been verified **locally**
   but the workflow itself has not yet actually run on GitHub Actions for
   this phase's changes (no push to a remote has triggered it yet).
-- inventory-service's reservation and release endpoints require only "any
-  authenticated caller," not a specific internal-service identity — there
-  is no service-to-service authentication mechanism yet, and
+- inventory-service's reservation and release endpoints require the
+  `OPERATOR` or `ADMIN` role, not a specific internal-service identity —
+  there is no service-to-service authentication mechanism yet, and
   order-service (the eventual real caller) has no endpoint of its own to
-  call from in this phase. See
-  `docs/architecture/trust-boundaries.md` and ADR-003's consequences
-  section. This is an authorization gap, not a data-consistency gap.
+  call from in this phase. They previously accepted any authenticated
+  caller, which let a `CUSTOMER` release another customer's reservation
+  (reservations have no customer owner); `ReservationAuthorizationTest`
+  and `ReservationApiIntegrationTest` now prove a `CUSTOMER` is denied.
+  See `docs/architecture/trust-boundaries.md` and ADR-003's consequences
+  section.
 - inventory-service's stock adjustment endpoint (`POST
   /api/v1/inventory/{productId}/adjust`) only increases stock in this
   phase — a negative delta is rejected as `INVALID_QUANTITY`. Decreasing

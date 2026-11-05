@@ -15,7 +15,7 @@ flowchart LR
     end
     subgraph edge[Trust boundary: authentication — Implemented in auth-service and inventory-service]
         authsvc["auth-service<br/>/api/v1/auth/register, /login (public)<br/>/api/v1/auth/me (JWT required)"]
-        inventorysvc["inventory-service<br/>product/stock writes: ADMIN only<br/>reads + reservations: any authenticated caller"]
+        inventorysvc["inventory-service<br/>product/stock writes: ADMIN only<br/>reads: any authenticated caller<br/>reservations: OPERATOR/ADMIN"]
         gateway["order-service public endpoints — Planned"]
     end
     subgraph internal[Trusted internal network]
@@ -57,9 +57,11 @@ authorization-decision level — role-gating happens in the services that
 consume its tokens, not in auth-service.
 
 Inventory-service's reservation endpoints (`POST
-/api/v1/inventory/reservations` and its `/release` counterpart) are
-"any authenticated caller" rather than role- or identity-restricted — this
-is a **documented, temporary** limitation, not an oversight: there is no
+/api/v1/inventory/reservations` and its `/release` counterpart) require the
+`OPERATOR` or `ADMIN` role rather than a specific service identity. They
+originally accepted any authenticated caller, so a `CUSTOMER` could release
+another customer's reservation by ID; the role restriction closes that. The
+missing service identity is a **documented, temporary** limitation: there is no
 service-to-service authentication mechanism yet, and order-service (the
 eventual real caller) has no endpoint of its own to call from in this
 phase. See CLAUDE.md's Known Limitations and

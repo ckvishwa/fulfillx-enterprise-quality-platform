@@ -63,7 +63,7 @@ class ReservationApiIntegrationTest {
         String productId = productWithStock(10);
 
         mockMvc.perform(post("/api/v1/inventory/reservations")
-                        .header("Authorization", "Bearer " + TestTokens.customerToken())
+                        .header("Authorization", "Bearer " + TestTokens.operatorToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(reserveRequestBody(UUID.randomUUID(), productId, 4, "key-" + UUID.randomUUID())))
                 .andExpect(status().isCreated())
@@ -82,7 +82,7 @@ class ReservationApiIntegrationTest {
         String productId = productWithStock(10);
 
         mockMvc.perform(post("/api/v1/inventory/reservations")
-                        .header("Authorization", "Bearer " + TestTokens.customerToken())
+                        .header("Authorization", "Bearer " + TestTokens.operatorToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(reserveRequestBody(UUID.randomUUID(), productId, 0, "key-" + UUID.randomUUID())))
                 .andExpect(status().isBadRequest())
@@ -94,7 +94,7 @@ class ReservationApiIntegrationTest {
         String productId = productWithStock(10);
 
         mockMvc.perform(post("/api/v1/inventory/reservations")
-                        .header("Authorization", "Bearer " + TestTokens.customerToken())
+                        .header("Authorization", "Bearer " + TestTokens.operatorToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(reserveRequestBody(UUID.randomUUID(), productId, -2, "key-" + UUID.randomUUID())))
                 .andExpect(status().isBadRequest())
@@ -106,7 +106,7 @@ class ReservationApiIntegrationTest {
         String productId = productWithStock(2);
 
         mockMvc.perform(post("/api/v1/inventory/reservations")
-                        .header("Authorization", "Bearer " + TestTokens.customerToken())
+                        .header("Authorization", "Bearer " + TestTokens.operatorToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(reserveRequestBody(UUID.randomUUID(), productId, 5, "key-" + UUID.randomUUID())))
                 .andExpect(status().isConflict())
@@ -123,7 +123,7 @@ class ReservationApiIntegrationTest {
     @Test
     void shouldRejectReservationForUnknownProduct() throws Exception {
         mockMvc.perform(post("/api/v1/inventory/reservations")
-                        .header("Authorization", "Bearer " + TestTokens.customerToken())
+                        .header("Authorization", "Bearer " + TestTokens.operatorToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(reserveRequestBody(UUID.randomUUID(), UUID.randomUUID().toString(), 1, "key-" + UUID.randomUUID())))
                 .andExpect(status().isNotFound())
@@ -148,7 +148,7 @@ class ReservationApiIntegrationTest {
         String idempotencyKey = "key-" + UUID.randomUUID();
 
         String firstResponse = mockMvc.perform(post("/api/v1/inventory/reservations")
-                        .header("Authorization", "Bearer " + TestTokens.customerToken())
+                        .header("Authorization", "Bearer " + TestTokens.operatorToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(reserveRequestBody(orderReference, productId, 3, idempotencyKey)))
                 .andExpect(status().isCreated())
@@ -156,7 +156,7 @@ class ReservationApiIntegrationTest {
         String reservationId = objectMapper.readTree(firstResponse).get("id").asText();
 
         String replayResponse = mockMvc.perform(post("/api/v1/inventory/reservations")
-                        .header("Authorization", "Bearer " + TestTokens.customerToken())
+                        .header("Authorization", "Bearer " + TestTokens.operatorToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(reserveRequestBody(orderReference, productId, 3, idempotencyKey)))
                 .andExpect(status().isOk())
@@ -177,14 +177,14 @@ class ReservationApiIntegrationTest {
         String idempotencyKey = "key-" + UUID.randomUUID();
 
         mockMvc.perform(post("/api/v1/inventory/reservations")
-                        .header("Authorization", "Bearer " + TestTokens.customerToken())
+                        .header("Authorization", "Bearer " + TestTokens.operatorToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(reserveRequestBody(UUID.randomUUID(), productId, 2, idempotencyKey)))
                 .andExpect(status().isCreated());
 
         // Same key, different quantity -> a client bug, not a safe replay.
         mockMvc.perform(post("/api/v1/inventory/reservations")
-                        .header("Authorization", "Bearer " + TestTokens.customerToken())
+                        .header("Authorization", "Bearer " + TestTokens.operatorToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(reserveRequestBody(UUID.randomUUID(), productId, 5, idempotencyKey)))
                 .andExpect(status().isConflict())
@@ -196,7 +196,7 @@ class ReservationApiIntegrationTest {
         String productId = productWithStock(10);
 
         String createResponse = mockMvc.perform(post("/api/v1/inventory/reservations")
-                        .header("Authorization", "Bearer " + TestTokens.customerToken())
+                        .header("Authorization", "Bearer " + TestTokens.operatorToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(reserveRequestBody(UUID.randomUUID(), productId, 4, "key-" + UUID.randomUUID())))
                 .andExpect(status().isCreated())
@@ -204,7 +204,7 @@ class ReservationApiIntegrationTest {
         String reservationId = objectMapper.readTree(createResponse).get("id").asText();
 
         mockMvc.perform(post("/api/v1/inventory/reservations/" + reservationId + "/release")
-                        .header("Authorization", "Bearer " + TestTokens.customerToken()))
+                        .header("Authorization", "Bearer " + TestTokens.operatorToken()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("RELEASED"));
 
@@ -216,11 +216,41 @@ class ReservationApiIntegrationTest {
     }
 
     @Test
+    void customerCannotReserveOrReleaseAnotherCustomersReservation() throws Exception {
+        String productId = productWithStock(3);
+
+        mockMvc.perform(post("/api/v1/inventory/reservations")
+                        .header("Authorization", "Bearer " + TestTokens.customerToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(reserveRequestBody(UUID.randomUUID(), productId, 3, "key-" + UUID.randomUUID())))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
+
+        String createResponse = mockMvc.perform(post("/api/v1/inventory/reservations")
+                        .header("Authorization", "Bearer " + TestTokens.operatorToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(reserveRequestBody(UUID.randomUUID(), productId, 2, "key-" + UUID.randomUUID())))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String reservationId = objectMapper.readTree(createResponse).get("id").asText();
+
+        mockMvc.perform(post("/api/v1/inventory/reservations/" + reservationId + "/release")
+                        .header("Authorization", "Bearer " + TestTokens.customerToken()))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(get("/api/v1/inventory/" + productId)
+                        .header("Authorization", "Bearer " + TestTokens.customerToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.availableQuantity").value(1))
+                .andExpect(jsonPath("$.reservedQuantity").value(2));
+    }
+
+    @Test
     void shouldTreatRepeatedReleaseAsIdempotentNoOp() throws Exception {
         String productId = productWithStock(10);
 
         String createResponse = mockMvc.perform(post("/api/v1/inventory/reservations")
-                        .header("Authorization", "Bearer " + TestTokens.customerToken())
+                        .header("Authorization", "Bearer " + TestTokens.operatorToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(reserveRequestBody(UUID.randomUUID(), productId, 4, "key-" + UUID.randomUUID())))
                 .andExpect(status().isCreated())
@@ -228,12 +258,12 @@ class ReservationApiIntegrationTest {
         String reservationId = objectMapper.readTree(createResponse).get("id").asText();
 
         mockMvc.perform(post("/api/v1/inventory/reservations/" + reservationId + "/release")
-                        .header("Authorization", "Bearer " + TestTokens.customerToken()))
+                        .header("Authorization", "Bearer " + TestTokens.operatorToken()))
                 .andExpect(status().isOk());
 
         // Second release of the same reservation must not restore stock again.
         mockMvc.perform(post("/api/v1/inventory/reservations/" + reservationId + "/release")
-                        .header("Authorization", "Bearer " + TestTokens.customerToken()))
+                        .header("Authorization", "Bearer " + TestTokens.operatorToken()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("RELEASED"));
 
@@ -247,7 +277,7 @@ class ReservationApiIntegrationTest {
     @Test
     void shouldRejectReleaseOfUnknownReservation() throws Exception {
         mockMvc.perform(post("/api/v1/inventory/reservations/" + UUID.randomUUID() + "/release")
-                        .header("Authorization", "Bearer " + TestTokens.customerToken()))
+                        .header("Authorization", "Bearer " + TestTokens.operatorToken()))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("RESERVATION_NOT_FOUND"));
     }
